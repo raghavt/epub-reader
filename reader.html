@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Custom Local Reader & TTS (Mobile Optimized)</title>
+    <script src="jszip.min.js"></script>
+    <style>
+        :root { --bg: #121212; --text: #e0e0e0; --panel: rgba(30, 30, 30, 0.95); --accent: #bb86fc; }
+        body { margin: 0; font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+        
+        /* Auto-hiding Toolbar */
+        #toolbar { 
+            position: fixed; top: 0; left: 0; right: 0; 
+            background: var(--panel); padding: 12px; display: flex; flex-direction: column; gap: 10px; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5); backdrop-filter: blur(5px); z-index: 100;
+            transform: translateY(-100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); 
+            border-bottom: 1px solid #333;
+        }
+        #toolbar.active { transform: translateY(0); }
+        
+        .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; }
+        #book-info { flex-basis: 100%; text-align: center; color: #aaa; font-size: 13px; font-weight: bold; letter-spacing: 1px; margin-bottom: 4px; text-transform: uppercase;}
+        #progress-text { color: var(--accent); font-weight: normal; margin-left: 5px; }
+
+        /* Viewer & Content */
+        #viewer { flex: 1; overflow-y: auto; width: 100%; }
+        #book-content { max-width: 800px; margin: 0 auto; padding: 40px 20px 120px 20px; line-height: 1.6; font-size: 18px; }
+        #viewer img, #viewer svg, #viewer image { max-width: 100% !important; height: auto !important; display: block; margin: 0 auto; border-radius: 4px; }
+        
+        /* Floating Action Buttons (FAB) */
+        .fab-container { position: fixed; bottom: 20px; right: 20px; display: flex; gap: 10px; z-index: 101; }
+        .fab { width: 50px; height: 50px; border-radius: 50%; border: none; font-size: 22px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: transform 0.1s; user-select: none; box-sizing: border-box; }
+        .fab:active { transform: scale(0.9); }
+        #fab-play { background: #3700b3; color: white; padding-left: 12px; }
+        #fab-play.playing { padding-left: 12px; background: #cf6679; color: black; }
+        #fab-menu { background: var(--accent); color: #121212; }
+
+        /* UI Elements */
+        button, select, input[type="file"] { padding: 8px 12px; font-size: 13px; border: 1px solid #444; border-radius: 6px; background: #2c2c2c; color: var(--text); cursor: pointer; }
+        .settings-group { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #ccc; background: #2c2c2c; padding: 4px 10px; border-radius: 6px; border: 1px solid #444; }
+        .val-display { display: inline-block; min-width: 35px; text-align: center; color: var(--accent); font-weight: bold; }
+        
+        .step-btn { background: #444; color: white; border: none; border-radius: 4px; width: 28px; height: 28px; font-size: 18px; font-weight: bold; display: flex; align-items: center; justify-content: center; user-select: none; padding: 0; cursor: pointer;}
+        .step-btn:active { background: var(--accent); color: black; }
+        
+        .btn-primary { background: #3700b3; border: none; color: white;}
+        
+        /* Highlighting */
+        .tts-sentence { cursor: pointer; transition: background 0.1s; border-radius: 3px; }
+        .tts-sentence:hover { background: rgba(255, 255, 255, 0.1); }
+        .tts-sentence.active { background: rgba(255, 235, 59, 0.4); color: white; }
+
+        /* Modals & Tips */
+        dialog { background: #1e1e1e; color: var(--text); border: 1px solid #444; border-radius: 8px; max-width: 400px; width: 90%; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); }
+        dialog::backdrop { background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(3px); }
+        .library-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #333; font-size: 14px;}
+        
+        #onboarding-tip { position: fixed; bottom: 85px; right: 20px; background: var(--accent); color: black; padding: 10px 15px; border-radius: 8px; font-weight: bold; font-size: 14px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); opacity: 0; pointer-events: none; transition: opacity 0.5s; z-index: 100;}
+        #onboarding-tip.visible { opacity: 1; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+    </style>
+</head>
+<body>
+
+    <div class="fab-container">
+        <button id="fab-play" class="fab" title="Play/Pause">
+            <svg id="icon-play" viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <button id="fab-menu" class="fab" title="Menu">☰</button>
+    </div>
+
+    <div id="onboarding-tip">⬅ Swipe left to turn page</div>
+
+    <div id="toolbar">
+        <div id="book-info">No Book Loaded <span id="progress-text"></span></div>
+        <div class="row">
+            <input type="file" id="upload" accept=".epub" style="display: none;" />
+            <button class="btn-primary" onclick="document.getElementById('upload').click()">📖 Open EPUB</button>
+            <button id="btn-library">📚 Library</button>
+            <button id="prev">◀ Prev Chapter</button>
+            <button id="next">Next Chapter ▶</button>
+        </div>
+        <div class="row">
+            <select id="voice-select"><option>Loading voices...</option></select>
+            <div class="settings-group">
+                <label>Speed</label>
+                <button class="step-btn" id="rate-down">−</button>
+                <span id="rate-val" class="val-display">1.0x</span>
+                <button class="step-btn" id="rate-up">+</button>
+            </div>
+            <div class="settings-group">
+                <label>Pause</label>
+                <button class="step-btn" id="pause-down">−</button>
+                <span id="pause-val" class="val-display">0.10s</span>
+                <button class="step-btn" id="pause-up">+</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="viewer">
+        <div id="book-content">
+            <div id="empty-state" style="text-align:center; margin-top: 10vh; display: flex; flex-direction: column; align-items: center; gap: 20px;">
+                <h2 style="color:#888; margin-bottom: 0;">Welcome to your Reader</h2>
+                <button class="btn-primary" style="font-size: 18px; padding: 12px 24px;" onclick="document.getElementById('upload').click()">📖 Open EPUB</button>
+                
+                <div id="empty-library-container" style="display: none; width: 100%; max-width: 450px; margin-top: 30px; text-align: left;">
+                    <h3 style="color: var(--accent); border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 15px;">Continue Reading</h3>
+                    <div id="empty-library-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <dialog id="library-modal">
+        <h3 style="margin-top:0;">Your Library</h3>
+        <div id="library-list" style="max-height: 50vh; overflow-y: auto; margin-bottom: 20px;"></div>
+        <div style="display: flex; justify-content: space-between;">
+            <button id="btn-clear" style="background:#cf6679; color:black; border:none; font-weight:bold;">🗑 Clear Data</button>
+            <button onclick="document.getElementById('library-modal').close()">Close</button>
+        </div>
+    </dialog>
+
+    <script>
+        console.log("[App] Initialization started.");
+        
+        let unzippedBook = null;
+        let spine = [];
+        let basePath = '';
+        let currentChapterIndex = 0;
+        let currentFilePath = '';
+        let currentBookFileName = ''; // Ties the current session to the DB and Progress keys
+        
+        let isReading = false;
+        let sentencesArray = [];
+        let voices = [];
+        let activeSession = 0;
+        let activeBlobUrls = []; 
+        let lastReadIndex = -1; 
+        
+        let currentRate = 1.0;
+        let currentPause = 100;
+        
+        let globalCharMap = []; 
+        let totalBookChars = 1; 
+        let currentChapterChars = 0;
+        let currentDynamicPercent = 0; // Globally tracked for the Library display
+        
+        let wakeLock = null;
+        let touchstartX = 0;
+        let touchendX = 0;
+        let touchstartY = 0;
+        let touchendY = 0;
+
+        const viewer = document.getElementById('viewer');
+        const bookContent = document.getElementById('book-content');
+        const voiceSelect = document.getElementById('voice-select');
+        const progressText = document.getElementById('progress-text');
+        const bookInfo = document.getElementById('book-info');
+        const toolbar = document.getElementById('toolbar');
+        const fabPlay = document.getElementById('fab-play');
+
+        // --- ONBOARDING LOGIC ---
+        function completeOnboarding() {
+            const tip = document.getElementById('onboarding-tip');
+            if (tip && tip.classList.contains('visible')) {
+                tip.classList.remove('visible');
+                localStorage.setItem('epub_onboarding_complete', 'true');
+            }
+        }
+
+        // --- UI BINDINGS ---
+        document.getElementById('rate-up').addEventListener('click', () => {
+            currentRate = Math.min(3.0, currentRate + 0.1);
+            document.getElementById('rate-val').textContent = currentRate.toFixed(1) + 'x';
+        });
+        document.getElementById('rate-down').addEventListener('click', () => {
+            currentRate = Math.max(0.5, currentRate - 0.1);
+            document.getElementById('rate-val').textContent = currentRate.toFixed(1) + 'x';
+        });
+        document.getElementById('pause-up').addEventListener('click', () => {
+            currentPause = Math.min(3000, currentPause + 50);
+            document.getElementById('pause-val').textContent = (currentPause / 1000).toFixed(2) + 's';
+        });
+        document.getElementById('pause-down').addEventListener('click', () => {
+            currentPause = Math.max(0, currentPause - 50);
+            document.getElementById('pause-val').textContent = (currentPause / 1000).toFixed(2) + 's';
+        });
+        document.getElementById('fab-menu').addEventListener('click', () => toolbar.classList.toggle('active'));
+        
+        viewer.addEventListener('click', (e) => {
+            const link = e.target.closest('a');
+            if (link) {
+                e.preventDefault();
+                const href = link.getAttribute('href');
+                if (href && !href.startsWith('http')) {
+                    const targetFile = href.split('#')[0]; 
+                    if (!targetFile) return; 
+                    const absolutePath = resolvePath(currentFilePath, targetFile);
+                    const targetIndex = spine.findIndex(s => (basePath + s) === absolutePath);
+                    
+                    if (targetIndex !== -1) {
+                        stopReading();
+                        renderChapter(targetIndex);
+                    }
+                }
+                return;
+            }
+            if(e.target.tagName !== 'SPAN' && e.target.tagName !== 'IMG') {
+                toolbar.classList.remove('active');
+            }
+        });
+
+        
+        // --- SYSTEM APIs & BACKGROUND HANDLING ---
+        async function requestWakeLock() {
+            if ('wakeLock' in navigator) {
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                } catch (err) { console.error(`Wake Lock failed: ${err.message}`); }
+            }
+        }
+
+        function releaseWakeLock() {
+            if (wakeLock !== null) { 
+                wakeLock.release().then(() => wakeLock = null).catch(()=>{}); 
+            }
+        }
+
+        // Attach this ONLY ONCE to prevent memory leaks and race conditions
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                // Re-acquire the wake lock if we return to the app while it's actively reading
+                if (isReading) requestWakeLock(); 
+            } else if (document.visibilityState === 'hidden') {
+                // The millisecond the user leaves the tab or locks the screen, force a pause.
+                // This prevents Android from silently mangling the TTS queue in the background.
+                if (isReading) {
+                    console.log("[System] App backgrounded. Forcing TTS to pause to preserve exact state.");
+                    stopReading(); 
+                }
+            }
+        });
+ 
+        viewer.addEventListener('touchstart', e => {
+            touchstartX = e.changedTouches[0].screenX;
+            touchstartY = e.changedTouches[0].screenY;
+        }, {passive: true});
+
+        viewer.addEventListener('touchend', e => {
+            touchendX = e.changedTouches[0].screenX;
+            touchendY = e.changedTouches[0].screenY;
+            handleSwipe();
+        }, {passive: true});
+
+        function handleSwipe() {
+            const diffX = touchendX - touchstartX;
+            const diffY = touchendY - touchstartY;
+            if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 75) {
+                completeOnboarding();
+                if (diffX < 0) { stopReading(); renderChapter(currentChapterIndex + 1); } 
+                else { stopReading(); renderChapter(currentChapterIndex - 1); }
+            }
+        }
+
+        // --- VOICES ---
+        function populateVoices() {
+            voices = Array.from(window.speechSynthesis.getVoices()).sort((a, b) => {
+                if (a.lang === b.lang) return a.name.localeCompare(b.name);
+                return a.lang.localeCompare(b.lang);
+            });
+            voiceSelect.innerHTML = '';
+            if (voices.length === 0) {
+                voiceSelect.add(new Option('No voices available', ''));
+            } else {
+                voices.forEach((v, i) => voiceSelect.add(new Option(`[${v.lang}] ${v.name}`, i)));
+                let defaultIndex = 0; 
+                const savedVoiceName = localStorage.getItem('epub_reader_voice');
+                let foundSavedVoice = false;
+
+                if (savedVoiceName) {
+                    const matchIndex = voices.findIndex(v => v.name === savedVoiceName);
+                    if (matchIndex !== -1) {
+                        defaultIndex = matchIndex;
+                        foundSavedVoice = true;
+                    }
+                }
+                
+                if (!foundSavedVoice) {
+                    const preferredLocales = ['en-in', 'en-gb', 'en-uk', 'en-au', 'en-us'];
+                    for (const locale of preferredLocales) {
+                        const matchIndex = voices.findIndex(v => {
+                            // Swap underscores for hyphens so Android and Web standards match
+                            const normalizedLang = v.lang.toLowerCase().replace('_', '-');
+                            return normalizedLang.includes(locale);
+                        });
+                        
+                        if (matchIndex !== -1) { defaultIndex = matchIndex; break; }
+                    }
+                }
+                voiceSelect.selectedIndex = defaultIndex;
+            }
+        }
+        
+        populateVoices();
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = () => populateVoices();
+        }
+
+        voiceSelect.addEventListener('change', (e) => {
+            const vIndex = parseInt(e.target.value, 10);
+            if (!isNaN(vIndex) && voices[vIndex]) {
+                localStorage.setItem('epub_reader_voice', voices[vIndex].name);
+            }
+        });
+
+        function resolvePath(basePath, relativePath) {
+            const baseParts = basePath.split('/');
+            baseParts.pop(); 
+            const relParts = relativePath.split('/');
+            for (const part of relParts) {
+                if (part === '..') baseParts.pop(); 
+                else if (part !== '.' && part !== '') baseParts.push(part);
+            }
+            return baseParts.join('/');
+        }
+
+        // --- DATABASE & LOAD ARCHITECTURE (PATH B) ---
+        const dbPromise = new Promise((resolve, reject) => {
+            const req = indexedDB.open('EpubReaderDB', 1);
+            req.onupgradeneeded = e => e.target.result.createObjectStore('BookStore');
+            req.onsuccess = e => resolve(e.target.result);
+            req.onerror = e => reject(e.target.error);
+        });
+
+        async function saveBookToCache(file) {
+            const db = await dbPromise;
+            const buffer = await file.arrayBuffer();
+            const tx = db.transaction('BookStore', 'readwrite');
+            // Save using the filename as the unique key to support multiple books
+            tx.objectStore('BookStore').put({ data: buffer, name: file.name }, file.name); 
+            console.log(`[System] EPUB saved to offline cache: ${file.name}`);
+        }
+
+        async function loadBookFromCache(key) {
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('BookStore', 'readonly');
+                const req = tx.objectStore('BookStore').get(key);
+                req.onsuccess = e => resolve(e.target.result);
+                req.onerror = () => resolve(null);
+            });
+        }
+
+        async function getAllBooksFromCache() {
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('BookStore', 'readonly');
+                const req = tx.objectStore('BookStore').getAll();
+                req.onsuccess = e => resolve(e.target.result);
+                req.onerror = () => resolve([]);
+            });
+        }
+
+        function saveProgress() {
+            if (!currentBookFileName) return;
+            const progressData = { 
+                chapter: currentChapterIndex, 
+                sentence: lastReadIndex,
+                percent: currentDynamicPercent 
+            };
+            localStorage.setItem('epub_progress_' + currentBookFileName, JSON.stringify(progressData));
+        }
+
+        // --- HOME SCREEN DASHBOARD LOGIC ---
+        async function renderEmptyStateLibrary() {
+            const container = document.getElementById('empty-library-container');
+            const listEl = document.getElementById('empty-library-list');
+            
+            if (!container || !listEl) return;
+
+            const books = await getAllBooksFromCache();
+            
+            // If no books exist, keep it hidden and clean
+            if (books.length === 0) {
+                container.style.display = 'none';
+                return;
+            }
+
+            container.style.display = 'block';
+            listEl.innerHTML = '';
+
+            books.forEach(b => {
+                const savedData = localStorage.getItem('epub_progress_' + b.name);
+                let displayPercent = '0%';
+                if (savedData) {
+                    const parsed = JSON.parse(savedData);
+                    if (parsed.percent) displayPercent = parsed.percent + '%';
+                }
+                
+                const card = document.createElement('div');
+                // Styling the card to look clickable and native
+                card.style.cssText = "display: flex; justify-content: space-between; align-items: center; background: #2c2c2c; padding: 16px; border-radius: 8px; cursor: pointer; border: 1px solid #444;";
+                
+                // Route to the book when the entire card is clicked
+                card.onclick = () => window.location.search = `?book=${encodeURIComponent(b.name)}`;
+                
+                card.innerHTML = `
+                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 75%; font-size: 16px; font-weight: 500;" title="${b.name}">
+                        ${b.name.replace('.epub', '')} 
+                    </span>
+                    <span style="color:var(--accent); font-weight:bold; font-size: 14px; background: #121212; padding: 4px 8px; border-radius: 4px;">${displayPercent}</span>
+                `;
+                
+                listEl.appendChild(card);
+            });
+        }
+
+        // --- INITIALIZATION ---
+        window.addEventListener('DOMContentLoaded', async () => {
+            if (!localStorage.getItem('epub_onboarding_complete')) {
+                document.getElementById('onboarding-tip').classList.add('visible');
+            }
+
+            // Route based on the URL parameter (Concurrency Fix)
+            const urlParams = new URLSearchParams(window.location.search);
+            const bookParam = urlParams.get('book');
+
+            if (bookParam) {
+                const cachedBook = await loadBookFromCache(bookParam);
+                if (cachedBook) {
+                    console.log("[System] Found requested book. Auto-loading...");
+                    const fileObj = new File([cachedBook.data], cachedBook.name);
+                    await processEpub(fileObj);
+                } else {
+                    console.warn("[System] Book in URL not found in local database.");
+                    history.replaceState(null, '', window.location.pathname); 
+                    // Book was deleted or missing, show the library dashboard instead
+                    renderEmptyStateLibrary(); 
+                }
+            } else {
+                // No book in URL, user landed on the root page. Show the library dashboard.
+                renderEmptyStateLibrary();
+            }
+        });
+
+        document.getElementById('upload').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            await saveBookToCache(file);
+            
+            // Push state so this specific tab is locked to this book on refresh
+            history.pushState(null, '', '?book=' + encodeURIComponent(file.name));
+            await processEpub(file);
+        });
+
+        // --- LIBRARY MODAL LOGIC ---
+        document.getElementById('btn-library').addEventListener('click', async () => {
+            const listEl = document.getElementById('library-list');
+            listEl.innerHTML = '<div style="text-align:center; padding: 20px;">Loading...</div>';
+            document.getElementById('library-modal').showModal();
+
+            const books = await getAllBooksFromCache();
+            if(books.length === 0) {
+                listEl.innerHTML = '<div style="text-align:center; padding: 20px; color: #888;">No books in library.</div>';
+                return;
+            }
+
+            listEl.innerHTML = '';
+            books.forEach(b => {
+                const savedData = localStorage.getItem('epub_progress_' + b.name);
+                let displayPercent = '0%';
+                if (savedData) {
+                    const parsed = JSON.parse(savedData);
+                    if (parsed.percent) displayPercent = parsed.percent + '%';
+                }
+                
+                const div = document.createElement('div');
+                div.className = 'library-item';
+                div.innerHTML = `
+                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%;" title="${b.name}">
+                        ${b.name.replace('.epub', '')} 
+                        <span style="color:var(--accent); font-weight:bold; margin-left: 5px;">${displayPercent}</span>
+                    </span>
+                    <button class="btn-primary" onclick="window.location.search = '?book=${encodeURIComponent(b.name)}'">Open</button>
+                `;
+                listEl.appendChild(div);
+            });
+        });
+
+        document.getElementById('btn-clear').addEventListener('click', async () => {
+            if(confirm("Are you sure you want to delete all books and reading history from this device?")) {
+                const db = await dbPromise;
+                const tx = db.transaction('BookStore', 'readwrite');
+                tx.objectStore('BookStore').clear();
+                
+                Object.keys(localStorage).forEach(key => {
+                    if(key.startsWith('epub_progress_')) localStorage.removeItem(key);
+                });
+                
+                window.location.search = ''; 
+            }
+        });
+
+        // --- EPUB PARSER ---
+        async function processEpub(file) {
+            currentBookFileName = file.name;
+            stopReading();
+            bookContent.innerHTML = '<h3 style="text-align:center;">Unzipping and parsing...</h3>';
+            progressText.textContent = "";
+            
+            try {
+                unzippedBook = await JSZip.loadAsync(file);
+                
+                const containerXml = await unzippedBook.file("META-INF/container.xml").async("string");
+                const parser = new DOMParser();
+                const containerDoc = parser.parseFromString(containerXml, "text/xml");
+                const opfPath = containerDoc.querySelector("rootfile").getAttribute("full-path");
+                
+                basePath = opfPath.includes('/') ? opfPath.substring(0, opfPath.lastIndexOf('/') + 1) : '';
+                const opfXml = await unzippedBook.file(opfPath).async("string");
+                const opfDoc = parser.parseFromString(opfXml, "text/xml");
+                
+                const titles = opfDoc.getElementsByTagNameNS("http://purl.org/dc/elements/1.1/", "title");
+                const bookTitle = titles.length ? titles[0].textContent : file.name.replace('.epub', '');
+                document.title = bookTitle;
+                bookInfo.childNodes[0].nodeValue = bookTitle + " ";
+
+                const manifest = {};
+                opfDoc.querySelectorAll("manifest > item").forEach(item => { manifest[item.getAttribute("id")] = item.getAttribute("href"); });
+                
+                spine = [];
+                opfDoc.querySelectorAll("spine > itemref").forEach(ref => { spine.push(manifest[ref.getAttribute("idref")]); });
+                
+                bookContent.innerHTML = '<h3 style="text-align:center;">Calculating book length...</h3>';
+                globalCharMap = [];
+                totalBookChars = 0;
+
+                for (let i = 0; i < spine.length; i++) {
+                    globalCharMap.push(totalBookChars); 
+                    const internalFile = unzippedBook.file(basePath + spine[i]);
+                    if (internalFile) {
+                        const htmlStr = await internalFile.async("string");
+                        const textLen = htmlStr.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().length;
+                        totalBookChars += textLen;
+                    }
+                }
+                if (totalBookChars === 0) totalBookChars = 1; 
+                // --- NEW FIX: Store sentence temporarily ---
+                let savedSentence = -1;
+
+                const savedData = localStorage.getItem('epub_progress_' + currentBookFileName);
+                if (savedData) {
+                    const parsed = JSON.parse(savedData);
+                    currentChapterIndex = parsed.chapter || 0;
+                    savedSentence = parsed.sentence || -1; 
+                } else {
+                    currentChapterIndex = 0;
+                }
+
+                await renderChapter(currentChapterIndex);
+                
+                // Re-apply it AFTER renderChapter resets it
+                lastReadIndex = savedSentence; 
+                
+                if (lastReadIndex > 0 && sentencesArray[lastReadIndex]) {
+                    setTimeout(() => {
+                        sentencesArray[lastReadIndex].el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        sentencesArray[lastReadIndex].el.classList.add('active'); 
+                    }, 200);
+                }
+                                
+            } catch (err) {
+                console.error("[Parser Error]", err);
+                bookContent.innerHTML = `<p style="color:red; text-align:center;">Error parsing EPUB: ${err.message}</p>`;
+            }
+        }
+
+
+        // --- RENDERING ---
+        async function renderChapter(index) {
+            if (index < 0 || index >= spine.length) return;
+            currentChapterIndex = index;
+            lastReadIndex = -1; 
+            
+            currentChapterChars = (globalCharMap[index + 1] || totalBookChars) - globalCharMap[index];
+            currentDynamicPercent = Math.floor((globalCharMap[index] / totalBookChars) * 100);
+            progressText.textContent = `— ${currentDynamicPercent}%`;
+            saveProgress(); 
+            
+            bookContent.innerHTML = '';
+            viewer.scrollTop = 0;
+            activeBlobUrls.forEach(url => URL.revokeObjectURL(url));
+            activeBlobUrls = [];
+
+            const filePath = basePath + spine[index];
+            currentFilePath = filePath;
+            
+            try {
+                let htmlStr = await unzippedBook.file(filePath).async("string");
+                const parser = new DOMParser();
+                let doc = parser.parseFromString(htmlStr, "application/xhtml+xml");
+                if (doc.querySelector("parsererror") || !doc.body) doc = parser.parseFromString(htmlStr, "text/html");
+
+                const bodyContent = doc.body || doc.getElementsByTagName("body")[0] || doc.documentElement;
+
+                const images = bodyContent.querySelectorAll('img, image');
+                for (const img of images) {
+                    let src = img.getAttribute('src') || img.getAttribute('href') || img.getAttribute('xlink:href');
+                    if (src && !src.startsWith('http') && !src.startsWith('data:')) {
+                        const decodedSrc = decodeURIComponent(src.split('#')[0]); 
+                        const absolutePath = resolvePath(filePath, decodedSrc);
+                        const file = unzippedBook.file(absolutePath);
+                        if (file) {
+                            const blob = await file.async('blob');
+                            const blobUrl = URL.createObjectURL(blob);
+                            activeBlobUrls.push(blobUrl);
+                            if (img.tagName.toLowerCase() === 'image') {
+                                img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', blobUrl);
+                                img.setAttribute('href', blobUrl);
+                            } else img.src = blobUrl;
+                        }
+                    }
+                }
+
+                sentencesArray = []; 
+                let globalSentenceIndex = 0;
+
+                function processNode(node) {
+                    if (node.nodeType === 3) { 
+                        const text = node.nodeValue;
+                        if (!text.trim()) return; 
+
+                        const sentences = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [text];
+                        const fragment = document.createDocumentFragment();
+                        
+                        sentences.forEach(sentenceText => {
+                            if(!sentenceText.trim()) { fragment.appendChild(document.createTextNode(sentenceText)); return; }
+                            
+                            const span = document.createElement('span');
+                            span.className = 'tts-sentence';
+                            span.textContent = sentenceText;
+                            span.dataset.index = globalSentenceIndex;
+                            
+                            span.addEventListener('click', (e) => {
+                                if (span.closest('a')) return; 
+                                e.stopPropagation(); 
+                                startOrResumeReading(parseInt(span.dataset.index), true);
+                            });
+                            
+                            fragment.appendChild(span);
+                            sentencesArray.push({ text: sentenceText.trim(), el: span });
+                            globalSentenceIndex++;
+                        });
+                        
+                        node.parentNode.replaceChild(fragment, node);
+                        
+                    } else if (node.nodeType === 1) { 
+                        const tag = node.tagName.toLowerCase();
+                        if (['script', 'style', 'svg', 'img', 'audio', 'video'].includes(tag)) return;
+                        Array.from(node.childNodes).forEach(processNode);
+                    }
+                }
+
+                processNode(bodyContent);
+                while (bodyContent.firstChild) { bookContent.appendChild(bodyContent.firstChild); }
+            } catch (err) { console.error(`[Render Error]:`, err); }
+        }
+
+
+        document.getElementById('prev').addEventListener('click', () => { 
+            completeOnboarding(); stopReading(); renderChapter(currentChapterIndex - 1); 
+        });
+        document.getElementById('next').addEventListener('click', () => { 
+            completeOnboarding(); stopReading(); renderChapter(currentChapterIndex + 1); 
+        });
+
+        // --- TTS ENGINE ---
+        function togglePlay(e) { isReading ? stopReading() : startOrResumeReading(null, true); }
+        fabPlay.addEventListener('click', togglePlay);
+        
+        document.addEventListener('keydown', (e) => {
+            if (['INPUT', 'SELECT'].includes(document.activeElement.tagName)) return;
+            if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+            if (e.code === 'ArrowLeft') { completeOnboarding(); stopReading(); renderChapter(currentChapterIndex - 1); }
+            if (e.code === 'ArrowRight') { completeOnboarding(); stopReading(); renderChapter(currentChapterIndex + 1); }
+        });
+
+        function stopReading() {
+            if (!isReading) return;
+            isReading = false;
+            activeSession++; 
+            window.speechSynthesis.cancel();
+            sentencesArray.forEach(s => s.el.classList.remove('active'));
+            
+            fabPlay.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+            fabPlay.classList.remove('playing');
+            releaseWakeLock();
+        }
+
+        function getFirstVisibleSentence() {
+            for (let i = 0; i < sentencesArray.length; i++) {
+                const rect = sentencesArray[i].el.getBoundingClientRect();
+                if (rect.bottom > 60 && rect.top < window.innerHeight) return i;
+            }
+            return 0;
+        }
+
+        async function startOrResumeReading(forceIndex = null, isDirectGesture = false) {
+            if (!sentencesArray.length) {
+                isReading = true;
+                activeSession++;
+                const mySession = activeSession;
+                
+                requestWakeLock();
+                fabPlay.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
+                fabPlay.classList.add('playing');
+                
+                await new Promise(res => setTimeout(res, 1500));
+                
+                if (isReading && activeSession === mySession) {
+                    if (currentChapterIndex + 1 < spine.length) {
+                        await renderChapter(currentChapterIndex + 1);
+                        startOrResumeReading(0);
+                    } else stopReading();
+                }
+                return;
+            }
+            
+            stopReading();
+            toolbar.classList.remove('active');
+
+            
+            let startIndex = 0;
+            
+            if (forceIndex !== null) {
+                // 1. User specifically clicked a sentence
+                startIndex = forceIndex;
+            } else if (lastReadIndex >= 0 && lastReadIndex < sentencesArray.length) {
+                // 2. Trust the saved index absolutely when hitting play
+                startIndex = lastReadIndex;
+            } else {
+                // 3. Fallback if it's a brand new chapter (lastReadIndex === -1)
+                startIndex = getFirstVisibleSentence();
+            }
+
+            isReading = true;
+
+            activeSession++;
+            const mySession = activeSession;
+            
+            requestWakeLock();
+            fabPlay.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
+            fabPlay.classList.add('playing');
+            
+            for (let i = startIndex; i < sentencesArray.length; i++) {
+                if (!isReading || activeSession !== mySession) break;
+                
+                const chunk = sentencesArray[i];
+                lastReadIndex = i;
+
+                const chapterProgressRatio = i / sentencesArray.length;
+                const charsReadInChapter = currentChapterChars * chapterProgressRatio;
+                const totalCharsRead = globalCharMap[currentChapterIndex] + charsReadInChapter;
+                currentDynamicPercent = Math.floor((totalCharsRead / totalBookChars) * 100);
+                progressText.textContent = `— ${currentDynamicPercent}%`;
+                
+                saveProgress(); 
+
+                sentencesArray.forEach(s => s.el.classList.remove('active'));
+                chunk.el.classList.add('active');
+                
+                const rect = chunk.el.getBoundingClientRect();
+                const viewerRect = viewer.getBoundingClientRect();
+                const topBoundary = viewerRect.top + (viewerRect.height * 0.10);
+                const bottomBoundary = viewerRect.top + (viewerRect.height * 0.85);
+
+                if (rect.top < topBoundary || rect.bottom > bottomBoundary) {
+                    const absoluteElementTop = viewer.scrollTop + (rect.top - viewerRect.top);
+                    viewer.scrollTo({ top: absoluteElementTop - (viewerRect.height * 0.15), behavior: 'smooth' });
+                }
+
+                // Remove the try/catch and check the boolean result instead
+                const playedSuccessfully = await speakText(chunk.text);
+                
+                // If Android blocked the audio or the user hit pause, halt immediately
+                if (!playedSuccessfully) {
+                    console.log("[System] Audio interrupted. Halting loop.");
+                    if (isReading) stopReading();
+                    break; // This completely stops the loop, preserving the exact lastReadIndex
+                }
+                
+                if (currentPause > 0 && isReading && activeSession === mySession) {
+                    await new Promise(res => setTimeout(res, currentPause));
+                }
+                
+            }
+            
+            if (isReading && activeSession === mySession) {
+                if (currentChapterIndex + 1 < spine.length) {
+                    await renderChapter(currentChapterIndex + 1);
+                    startOrResumeReading(0);
+                } else stopReading();
+            }
+        }
+
+        function speakText(text) {
+            return new Promise((resolve) => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                const vIndex = parseInt(voiceSelect.value, 10); 
+                
+                if (!isNaN(vIndex) && voices[vIndex]) {
+                    const selectedVoice = voices[vIndex];
+                    utterance.voice = selectedVoice;
+                    utterance.lang = selectedVoice.lang; 
+                }
+                
+                utterance.rate = currentRate;
+                
+                // Resolve TRUE if it finishes normally
+                utterance.onend = () => resolve(true);
+                
+                // Resolve FALSE if it gets interrupted, canceled, or backgrounded
+                utterance.onerror = (e) => {
+                    console.warn("[TTS] Interrupted or failed:", e.error);
+                    resolve(false); 
+                }; 
+                
+                window.speechSynthesis.speak(utterance);
+            });
+        }   
+    </script>
+</body>
+</html>

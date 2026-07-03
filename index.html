@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local EPUB Reader & TTS</title>
+    <style>
+        :root { --bg: #121212; --text: #e0e0e0; --panel: rgba(30, 30, 30, 0.95); --accent: #bb86fc; }
+        body { margin: 0; font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+        
+        header { background: var(--panel); padding: 30px 20px; text-align: center; border-bottom: 1px solid #333; position: sticky; top: 0; z-index: 10; backdrop-filter: blur(5px); }
+        header h1 { margin: 0 0 10px 0; font-size: 28px; letter-spacing: 1px; }
+        header p { margin: 0 0 20px 0; color: #aaa; font-size: 15px; }
+        
+        .btn-primary { background: #3700b3; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block; transition: transform 0.1s; }
+        .btn-primary:hover { background: #4a148c; }
+        .btn-primary:active { transform: scale(0.95); }
+
+        main { max-width: 800px; margin: 0 auto; padding: 30px 20px 80px 20px; }
+        
+        h2 { color: var(--accent); border-bottom: 1px solid #333; padding-bottom: 8px; margin-top: 50px; font-size: 22px;}
+        
+        .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 20px; }
+        .card { background: #1e1e1e; padding: 25px; border-radius: 8px; border: 1px solid #333; }
+        .card h3 { margin-top: 0; color: #fff; font-size: 18px; display: flex; align-items: center; gap: 8px;}
+        .card ul { padding-left: 20px; color: #bbb; margin-bottom: 0;}
+        .card li { margin-bottom: 10px; }
+        .card p { color: #bbb; margin-bottom: 0; font-size: 15px; }
+
+        /* About Section Styling */
+        .about-section { background: rgba(187, 134, 252, 0.05); border-left: 4px solid var(--accent); padding: 25px; border-radius: 0 8px 8px 0; margin-top: 30px; font-size: 16px; color: #ccc;}
+        .about-section h3 { margin-top: 0; color: var(--accent); font-size: 18px; margin-bottom: 15px;}
+        .about-section p { margin-bottom: 15px; }
+        .about-section p:last-child { margin-bottom: 0; }
+
+        .book-list { list-style: none; padding: 0; margin-top: 20px; }
+        .book-list li { background: #1e1e1e; margin-bottom: 15px; padding: 20px; border-radius: 8px; border: 1px solid #333; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;}
+        .book-info strong { display: block; font-size: 18px; color: #fff; margin-bottom: 4px; }
+        .book-info span { color: #888; font-size: 14px; }
+        .download-btn { background: #2c2c2c; color: var(--accent); text-decoration: none; padding: 8px 16px; border-radius: 4px; border: 1px solid #444; font-size: 14px; transition: background 0.2s;}
+        .download-btn:hover { background: #3a3a3a; }
+        
+        .badge { display: inline-block; background: #cf6679; color: black; font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: bold; vertical-align: middle; margin-left: 8px;}
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Focused Reading Environment</h1>
+        <p>A private, local, and distraction-free EPUB reader powered by native TTS.</p>
+        <a href="reader.html" class="btn-primary">📖 Open Web Reader</a>
+    </header>
+
+    <main>
+        
+        <div class="about-section">
+            <h3>About This Project</h3>
+            <p><strong>The Origin:</strong> This tool was created out of a simple necessity. Sitting down to read dense, long-form text for hours can be tough on the eyes, and following along with a text-to-speech narrator offers an incredible benefit. By combining audio with active sentence highlighting and smooth autoscrolling, the physical friction of reading is removed. It keeps the eyes anchored and makes the entire experience effortless.</p>
+            <p><strong>Deep Learning vs. Distraction:</strong> The best way to acquire formal, structured information is still through books. The modern media diet—endless blogs, 24/7 news cycles, social media feed—is engineered for distraction. It fractures attention and simply doesn't facilitate the kind of deep, focused learning required to actually master complex subjects.</p>
+            <p><strong>Who Is This For?</strong> This is for anyone looking to reclaim their attention span. It is a deliberately minimal, self-contained tool built for deep work. There are no algorithms, no telemetry, no tracking, and no backend servers. A smart device and an EPUB file are all that is needed to create a quiet, focused environment for reading.</p>
+        </div>
+        
+        <h2>Core Features & Privacy</h2>
+        <div class="card-grid">
+            <div class="card">
+                <h3>🔒 100% Local & Private</h3>
+                <p>This application has no backend server. When you "upload" a book, it never leaves your device. The EPUB is unzipped and processed entirely within your browser's memory, ensuring total privacy.</p>
+            </div>
+            <div class="card">
+                <h3>💾 Persistent Offline Library</h3>
+                <p>Your books and reading progress are saved automatically to your browser's internal IndexedDB storage. You can close the tab, go offline, and return later to resume exactly where you left off via the Library dashboard.</p>
+            </div>
+        </div>
+
+        <h2>How to Use</h2>
+        <div class="card-grid">
+            <div class="card">
+                <h3>📱 Mobile Controls</h3>
+                <ul>
+                    <li><strong>Upload:</strong> Tap the menu (☰) to open a local EPUB file.</li>
+                    <li><strong>Navigation:</strong> Swipe left or right on the screen to change chapters.</li>
+                    <li><strong>Playback:</strong> Tap the floating Play button to start. The screen will automatically acquire a wake lock so it doesn't sleep while reading.</li>
+                    <li><strong>Jump:</strong> Tap any specific sentence to start reading from there.</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>💻 Desktop Controls</h3>
+                <ul>
+                    <li><strong>Shortcuts:</strong> Press the <code>Spacebar</code> to Play/Pause instantly.</li>
+                    <li><strong>Navigation:</strong> Use the <code>Left Arrow</code> and <code>Right Arrow</code> keys to switch chapters.</li>
+                    <li><strong>Jump:</strong> Click on any sentence to immediately jump the audio to that spot.</li>
+                    <li><strong>Settings:</strong> Use the top toolbar to adjust reading speed and the pause duration between sentences.</li>
+                </ul>
+            </div>
+        </div>
+
+        <h2>Getting Better Voices <span class="badge">PRO TIP</span></h2>
+        <p style="color: #bbb; font-size: 15px; margin-bottom: 20px;">This app uses the native Text-to-Speech (TTS) engine built into your device. If you only hear robotic voices, you likely need to download high-quality voice packs from your operating system settings.</p>
+        
+        <div class="card-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+            <div class="card" style="padding: 15px;">
+                <h3 style="font-size: 15px;">🍏 iOS / macOS</h3>
+                <p style="font-size: 13px;">Go to <strong>Settings > Accessibility > Spoken Content > Voices</strong>. Download the "Enhanced" or "Premium" versions of your preferred voices (like Siri, Alex, or Zoe).</p>
+            </div>
+            <div class="card" style="padding: 15px;">
+                <h3 style="font-size: 15px;">🤖 Android</h3>
+                <p style="font-size: 13px;">Go to <strong>Settings > Accessibility > Text-to-Speech output</strong>. Tap the gear icon next to your preferred engine (Google or Samsung) to install new voice data packs.</p>
+            </div>
+            <div class="card" style="padding: 15px;">
+                <h3 style="font-size: 15px;">🪟 Windows</h3>
+                <p style="font-size: 13px;">Go to <strong>Settings > Time & Language > Speech</strong>. Under "Manage voices," click "Add voices" to install natural-sounding localized language packs.</p>
+            </div>
+        </div>
+
+        <h2>Sample Books (Public Domain)</h2>
+        <p style="color: #aaa; margin-bottom: 20px;">Download these `.epub` files to your device, then open them in the Web Reader above to test it out.</p>
+        
+        <ul class="book-list">
+            <li>
+                <div class="book-info">
+                    <strong>Meditations</strong>
+                    <span>Marcus Aurelius</span>
+                </div>
+                <a href="https://www.gutenberg.org/ebooks/2680.epub.images" download class="download-btn">Download EPUB ↓</a>
+            </li>
+            <li>
+                <div class="book-info">
+                    <strong>Frankenstein</strong>
+                    <span>Mary Wollstonecraft Shelley</span>
+                </div>
+                <a href="https://www.gutenberg.org/ebooks/84.epub.images" download class="download-btn">Download EPUB ↓</a>
+            </li>
+            <li>
+                <div class="book-info">
+                    <strong>Moby Dick; Or, The Whale</strong>
+                    <span>Herman Melville</span>
+                </div>
+                <a href="https://www.gutenberg.org/ebooks/2701.epub.images" download class="download-btn">Download EPUB ↓</a>
+            </li>
+        </ul>
+    </main>
+
+</body>
+</html>
