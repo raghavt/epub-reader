@@ -1,6 +1,6 @@
 # Focused Reading Environment: Local EPUB Reader & TTS
 
-**🚀 Try the Live Demo:** [local-epub-reader.netlify.app](https://www.google.com/search?q=https://local-epub-reader.netlify.app)
+**🚀 Try the Live Demo:** [local-epub-reader.netlify.app](https://local-epub-reader.netlify.app)
 
 A private, self-contained, and distraction-free EPUB reader powered by your device's native Text-to-Speech (TTS) engine.
 
